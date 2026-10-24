@@ -3,3 +3,17 @@ __pycache__/
 *.pyc
 .DS_Store
 workspace/out/
+
+# Secrets and environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Claude local configuration
+.claude/
+
+# Python cache
+.pytest_cache/
