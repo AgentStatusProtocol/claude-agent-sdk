@@ -28,15 +28,19 @@ Events carry state only: no prompts, tool inputs, file contents or outputs. The 
 
 ## Files
 
-`agent.py` is the agent (options, subagent, prompts). `asp_bridge.py` is the reusable part: hooks, heartbeat thread, guardrail, governance enforcement. `asp_client.py` is a stdlib-only ASP client. `asp_operator.py` is an operator CLI that lists agents and changes their governance state with `source: operator`. `keychain.py` and `scripts/anthropic-key-from-keychain.sh` read secrets from the macOS Keychain.
+`agent.py` is the agent (options, subagent, prompts). `asp_bridge.py` is the reusable part: hooks, heartbeat thread, guardrail, governance enforcement. `asp_client.py` is a stdlib-only ASP client. `asp_operator.py` is an operator CLI that lists agents and changes their governance state with `source: operator`. `keychain.py` reads secrets from the macOS Keychain or, on Windows, from Credential Manager. The Claude Code helpers are `scripts/anthropic-key-from-keychain.sh` and `scripts/anthropic-key-from-credential-manager.py`.
 
 ## Setup
 
-Requirements: macOS, Python 3.10+, an Anthropic API key, and the illustrative status server from the spec repository. The Agent SDK bundles the Claude Code CLI it runs on.
+Requirements: macOS or Windows, Python 3.10+, an Anthropic API key, and the illustrative status server from the spec repository. The Agent SDK bundles the Claude Code CLI it runs on. Linux and CI use the environment variable instead of an OS secret store.
 
-### 1. Store the API key in the macOS Keychain
+### 1. Store the API key
 
-The key is never exported, written to a file or typed on the command line. Run this and paste the key when `security` asks for the password:
+The key is never exported, written to a file or typed on the command line. On macOS it lives in the Keychain. On Windows it lives in Credential Manager, for the current Windows user. In both cases the agent passes Claude Code an `apiKeyHelper`: the Claude Code process runs that helper when it needs the key and keeps the key in memory only. The key never appears in your shell, its history, or the environment of the Python process. If `ANTHROPIC_API_KEY` is set in the shell, the agent refuses to start, so a forgotten export cannot silently take over.
+
+#### macOS Keychain
+
+Run this and paste the key when `security` asks for the password:
 
 ```bash
 security add-generic-password -U -a "$USER" -s anthropic-api-key -w
@@ -48,7 +52,7 @@ Check it without printing it (standard library only, works before installing any
 python3 keychain.py
 ```
 
-How it is used: the agent passes the Claude Code setting `apiKeyHelper` to the SDK, pointing to `scripts/anthropic-key-from-keychain.sh`. The Claude Code process runs that script when it needs the key and keeps it in memory only. The key never appears in your shell, its history, or the environment of the Python process. If `ANTHROPIC_API_KEY` is set in the shell, the agent refuses to start, so a forgotten export cannot silently take over.
+The helper on macOS is `scripts/anthropic-key-from-keychain.sh`.
 
 For a stricter setup, create the item so that macOS asks for confirmation on every read, instead of letting any process of your user read it through `security`:
 
@@ -56,7 +60,23 @@ For a stricter setup, create the item so that macOS asks for confirmation on eve
 security add-generic-password -U -a "$USER" -s anthropic-api-key -T "" -w
 ```
 
-The optional bearer token of the ASP server can live in the Keychain too, under the service name `asp-token`; the agent and the operator CLI read it automatically.
+The optional bearer token of the ASP server can live in the same store, under the name `asp-token`; the agent and the operator CLI read it automatically. On macOS that is a Keychain item. On Windows, store it with `python keychain.py --set asp-token`.
+
+#### Windows Credential Manager
+
+From this folder (standard library only, works before installing anything):
+
+```powershell
+python keychain.py --set
+```
+
+Python prompts with no echo. The item name is `anthropic-api-key`. Check it without printing it:
+
+```powershell
+python keychain.py
+```
+
+The helper on Windows is `scripts/anthropic-key-from-credential-manager.py`, run with the same Python that launched the agent. `--key-source wincred` is the default on Windows, so `python agent.py` uses Credential Manager.
 
 If the key is invalid or revoked, the agent stops within seconds with `health: auth-error` and `task: failed` on the dashboard, instead of waiting for the SDK's full retry sequence.
 
@@ -77,7 +97,9 @@ python3 keychain.py
 
 To remove the key without replacing it, run only the first command.
 
-Two things to keep in mind. Deleting the key from the Keychain does not disable it: to make an old key unusable, revoke it in the Claude Console. And an agent that is already running may keep using the old key for a few minutes, because the SDK holds it in memory: stop the agent and start it again after the change.
+On Windows, `python keychain.py --set` overwrites the same Credential Manager target. `python keychain.py --delete` removes it. Check either change with `python keychain.py`.
+
+Two things to keep in mind. Deleting the key from the Keychain or from Credential Manager does not disable it: to make an old key unusable, revoke it in the Claude Console. And an agent that is already running may keep using the old key for a few minutes, because the SDK holds it in memory: stop the agent and start it again after the change.
 
 ### 2. Start the status server
 
@@ -99,7 +121,18 @@ pip install -r requirements.txt
 python agent.py
 ```
 
-On Linux or in CI, `--key-source env` falls back to the `ANTHROPIC_API_KEY` environment variable.
+On Windows, from PowerShell:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python agent.py
+```
+
+If PowerShell refuses to run the activation script, allow it for this window only with `Set-ExecutionPolicy -Scope Process RemoteSigned`, then run the activation script again.
+
+On Linux or in CI, `--key-source env` falls back to the `ANTHROPIC_API_KEY` environment variable. There is no Keychain or Credential Manager path on those systems.
 
 ## Stopping everything
 
@@ -164,7 +197,7 @@ Within about two seconds every tool call of the main agent is denied; when the a
 
 ## Options
 
-`--server`, `--token` (or `ASP_SERVER`, `ASP_TOKEN`, or the Keychain item `asp-token`), `--key-source` (`keychain` by default, or `env`), `--keychain-service` (default `anthropic-api-key`), `--check-key`, `--id`, `--name`, `--model` (or `CLAUDE_MODEL`), `--interval` (heartbeat seconds, default 5), `--stall-after` (default 45), `--tempt`, `--auto-approve`, `--verbose` (prints every ASP event sent).
+`--server`, `--token` (or `ASP_SERVER`, `ASP_TOKEN`, or the OS store item `asp-token`), `--key-source` (`keychain` on macOS, `wincred` on Windows, or `env`), `--keychain-service` (default `anthropic-api-key`; the Keychain item or Credential Manager target), `--check-key`, `--id`, `--name`, `--model` (or `CLAUDE_MODEL`), `--interval` (heartbeat seconds, default 5), `--stall-after` (default 45), `--tempt`, `--auto-approve`, `--verbose` (prints every ASP event sent).
 
 ## Limits, deliberately
 

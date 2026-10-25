@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parent
 WORKSPACE = ROOT / "workspace"
 OUT_DIR = WORKSPACE / "out"
 KEY_HELPER = ROOT / "scripts" / "anthropic-key-from-keychain.sh"
+WIN_HELPER = ROOT / "scripts" / "anthropic-key-from-credential-manager.py"
 KEY_HELPER_SOURCE = '#!/bin/sh\n# apiKeyHelper for the Claude Agent SDK: prints the Anthropic API key stored in the macOS Keychain.\n# The key never lives in a file, in the shell history or in the parent process environment.\nSERVICE="${1:-anthropic-api-key}"\nexec /usr/bin/security find-generic-password -a "$USER" -s "$SERVICE" -w\n'
 
 SYSTEM_PROMPT = """You are Supplier Desk, a purchasing assistant for a machine builder.
@@ -112,12 +113,35 @@ def ensure_sample_data():
         print(f"Wrote {written} sample files (demo data version {SAMPLE_VERSION}).")
 
 
-KEY_HINT = ("Check the key stored in the Keychain: python3 keychain.py, "
+def default_key_source():
+    """Keychain on macOS, Credential Manager on Windows. Other systems must ask for env."""
+    if sys.platform == "win32":
+        return "wincred"
+    return "keychain"
+
+
+def key_hint():
+    if sys.platform == "win32":
+        return ("Check the key stored in Credential Manager: python keychain.py, "
+                "or replace it with: python keychain.py --set")
+    return ("Check the key stored in the Keychain: python3 keychain.py, "
             "or replace it with: security add-generic-password -U -a \"$USER\" -s anthropic-api-key -w")
 
 
+def quote_windows(arg):
+    """Quote one argument for cmd.exe and for a POSIX shell.
+
+    Forward slashes keep backslashes from being eaten when the helper is run
+    by a shell. cmd.exe treats spaces and & | < > ^ as metacharacters.
+    """
+    text = os.fspath(arg).replace("\\", "/")
+    if text == "" or any(ch in text for ch in ' \t"&|<>^'):
+        return '"' + text.replace('"', '""') + '"'
+    return text
+
+
 def key_settings(args):
-    """Claude Code settings that make the SDK fetch the API key from the Keychain on demand.
+    """Claude Code settings that make the SDK fetch the API key from the OS store on demand.
 
     With apiKeyHelper the key is requested by the Claude Code process when it needs it:
     it is never in a file, in the shell history or in this Python process's environment.
@@ -127,14 +151,28 @@ def key_settings(args):
     if os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("ANTHROPIC_API_KEY is set in this shell: run `unset ANTHROPIC_API_KEY` "
                  "or use --key-source env explicitly.")
-    if sys.platform != "darwin":
-        sys.exit("--key-source keychain needs macOS. Use --key-source env on other systems.")
-    if not KEY_HELPER.exists():
-        KEY_HELPER.parent.mkdir(parents=True, exist_ok=True)
-        KEY_HELPER.write_text(KEY_HELPER_SOURCE, encoding="utf-8")
-        print(f"Created {KEY_HELPER.relative_to(ROOT)}")
-    KEY_HELPER.chmod(0o700)
-    command = f"{shlex.quote(str(KEY_HELPER))} {shlex.quote(args.keychain_service)}"
+    if args.key_source == "keychain":
+        if sys.platform != "darwin":
+            sys.exit("--key-source keychain needs macOS. "
+                     "On Windows the default is Credential Manager (--key-source wincred); "
+                     "on Linux or in CI use --key-source env.")
+        if not KEY_HELPER.exists():
+            KEY_HELPER.parent.mkdir(parents=True, exist_ok=True)
+            KEY_HELPER.write_text(KEY_HELPER_SOURCE, encoding="utf-8")
+            print(f"Created {KEY_HELPER.relative_to(ROOT)}")
+        KEY_HELPER.chmod(0o700)
+        command = f"{shlex.quote(str(KEY_HELPER))} {shlex.quote(args.keychain_service)}"
+    elif args.key_source == "wincred":
+        if sys.platform != "win32":
+            sys.exit("--key-source wincred needs Windows. "
+                     "On macOS the default is the Keychain (--key-source keychain); "
+                     "on Linux or in CI use --key-source env.")
+        if not WIN_HELPER.exists():
+            sys.exit(f"Missing {WIN_HELPER.relative_to(ROOT)}")
+        command = " ".join(quote_windows(part) for part in (
+            sys.executable, WIN_HELPER, args.keychain_service))
+    else:
+        sys.exit(f"Unknown --key-source {args.key_source!r}.")
     return json.dumps({"apiKeyHelper": command})
 
 
@@ -189,7 +227,7 @@ async def run(args):
                 abort = await bridge.on_message(message)
                 if abort and not aborted:
                     aborted = True
-                    print(f"\nAPI authentication failed ({abort}). " + KEY_HINT)
+                    print(f"\nAPI authentication failed ({abort}). " + key_hint())
                     reason = abort
                     await client.interrupt()
                 if isinstance(message, AssistantMessage) and message.parent_tool_use_id is None:
@@ -211,13 +249,15 @@ def main():
     parser = argparse.ArgumentParser(description="Claude Agent SDK agent reporting through ASP")
     parser.add_argument("--server", default=os.environ.get("ASP_SERVER", "http://127.0.0.1:8765"))
     parser.add_argument("--token", default=None,
-                        help="ASP bearer token; default: ASP_TOKEN or the Keychain item 'asp-token'")
-    parser.add_argument("--key-source", choices=["keychain", "env"], default="keychain",
-                        help="where the Anthropic API key comes from (default: macOS Keychain)")
+                        help="ASP bearer token; default: ASP_TOKEN, or the OS store item 'asp-token'")
+    parser.add_argument("--key-source", choices=["keychain", "wincred", "env"],
+                        default=default_key_source(),
+                        help="where the Anthropic API key comes from "
+                             "(default: keychain on macOS, wincred on Windows)")
     parser.add_argument("--keychain-service", default="anthropic-api-key",
-                        help="Keychain service name of the Anthropic API key")
+                        help="Keychain item or Credential Manager target holding the Anthropic API key")
     parser.add_argument("--check-key", action="store_true",
-                        help="check that the Keychain holds an API key (never prints it) and exit")
+                        help="check that the OS secret store holds an API key (never prints it) and exit")
     parser.add_argument("--id", default="urn:agent:demo:supplier-desk")
     parser.add_argument("--name", default="Supplier Desk")
     parser.add_argument("--model", default=os.environ.get("CLAUDE_MODEL"))
