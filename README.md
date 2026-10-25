@@ -191,7 +191,14 @@ python asp_operator.py list
 python asp_operator.py quarantine urn:agent:demo:supplier-desk --reason suspected-prompt-injection
 ```
 
-Within about two seconds every tool call of the main agent is denied; when the agent gives up, its task ends as `canceled`. Try `sandbox` instead to allow read-only tools only, and `release` to restore `normal`.
+Within about two seconds every tool call of the main agent is denied; when the agent gives up, its task ends as `canceled`.
+
+Two other operator commands use the same form. `sandbox` sets governance to `sandboxed`: the agent may still use `Read`, `Glob` and `Grep`, and every other tool is denied. `release` sets governance back to `normal`. `--reason` is optional on all three commands; when omitted, the reason is `operator-decision`.
+
+```bash
+python asp_operator.py sandbox urn:agent:demo:supplier-desk
+python asp_operator.py release urn:agent:demo:supplier-desk
+```
 
 **5. Liveness.** Stop the agent with `Ctrl+C`: it deregisters cleanly. Kill it instead (`kill -9 <PID>`, with the number shown by `pgrep -fl agent.py`): after 2.5 heartbeat intervals the server marks it `unreachable`.
 
