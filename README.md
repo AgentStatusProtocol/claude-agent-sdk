@@ -28,7 +28,7 @@ Events carry state only: no prompts, tool inputs, file contents or outputs. The 
 
 ## Files
 
-`agent.py` is the agent (options, subagent, prompts). `asp_bridge.py` is the reusable part: hooks, heartbeat thread, guardrail, governance enforcement. `asp_client.py` is a stdlib-only ASP client. `asp_operator.py` is an operator CLI that lists agents and changes their governance state with `source: operator`. `keychain.py` reads secrets from the macOS Keychain or, on Windows, from Credential Manager. The Claude Code helpers are `scripts/anthropic-key-from-keychain.sh` and `scripts/anthropic-key-from-credential-manager.py`.
+`agent.py` is the agent (options, subagent, prompts). `asp_bridge.py` is the reusable part: hooks, heartbeat thread, guardrail, governance enforcement. `asp_client.py` is a stdlib-only ASP client. `asp_operator.py` is an operator CLI that lists agents and changes their governance state with `source: operator`. `keychain.py` reads secrets from the macOS Keychain or, on Windows, from Credential Manager. The Claude Code helpers are `scripts/anthropic-key-from-keychain.sh` and `scripts/anthropic-key-from-credential-manager.py`. Screen recordings in `videos/` stay on the machine that made them and are not part of this repository.
 
 ## Setup
 

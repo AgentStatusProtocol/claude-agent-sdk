@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .DS_Store
 workspace/out/
+videos/
 
 # Secrets and environment
 .env
