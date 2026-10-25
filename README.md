@@ -200,6 +200,16 @@ python asp_operator.py sandbox urn:agent:demo:supplier-desk
 python asp_operator.py release urn:agent:demo:supplier-desk
 ```
 
+`urn:agent:demo:supplier-desk` is the main agent. Each `doc-analyst` subagent is an ASP agent of its own, and the commands work on it the same way, because every tool call is checked against the governance of the agent that makes it. Use the subagent's URN instead:
+
+```bash
+python asp_operator.py quarantine urn:agent:demo:supplier-desk:sub:doc-analyst:a68f1e28
+```
+
+Only that analyst is affected: its next tool call is denied and its task ends as `canceled`, while the other analysts carry on. Two things make this harder than quarantining the main agent. The last part of the URN is generated when the subagent starts, so it changes on every run and cannot be prepared in advance. And each analyst is active for only a few seconds. Keep the command ready without the URN, copy the URN from the dashboard or from `python asp_operator.py list` as soon as a `doc-analyst` turns `busy`, and run it straight away. The URN does not say which document the analyst is reading, so you cannot pick the Trasporti Est analyst in advance. For a reliable, repeatable demonstration, quarantine the main agent.
+
+The status server keeps governance in memory for each URN. After a test on the main agent, run `release` on it, or restart the server, before the next run.
+
 **5. Liveness.** Stop the agent with `Ctrl+C`: it deregisters cleanly. Kill it instead (`kill -9 <PID>`, with the number shown by `pgrep -fl agent.py`): after 2.5 heartbeat intervals the server marks it `unreachable`.
 
 ## Options
