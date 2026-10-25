@@ -216,6 +216,32 @@ This is an illustrative sketch, not a production integration.
 - The injection detector uses a few illustrative regular expressions. It catches the planted example and common phrasings, but a real deployment needs a proper classifier and will still miss some attacks; the model's own instruction to report suspicious text is the second layer.
 - The reference server keeps state in memory and is not conformance-tested.
 
+## Other model providers (not implemented)
+
+The demo has been tested only against the Anthropic API. The Agent SDK can also reach Claude models through Amazon Bedrock, Google Vertex AI, Microsoft Foundry and Claude Platform on AWS. Claude Code reads the provider choice from environment variables, so most of the change is configuration. The ASP side does not depend on the provider: hooks, events, guardrail, injection detector, governance and human approval attach to Claude Code, not to the connection to the model. Nothing in this section is implemented yet; it lists what a future change would need.
+
+| Provider | Variable that selects it | Credentials |
+|---|---|---|
+| Amazon Bedrock | `CLAUDE_CODE_USE_BEDROCK=1` | AWS |
+| Google Vertex AI | `CLAUDE_CODE_USE_VERTEX=1` | Google Cloud |
+| Microsoft Foundry | `CLAUDE_CODE_USE_FOUNDRY=1` | Azure |
+| Claude Platform on AWS | `CLAUDE_CODE_USE_ANTHROPIC_AWS=1` and `ANTHROPIC_AWS_WORKSPACE_ID` | AWS |
+
+The provider setup guides linked from the [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) cover regions, model access and the full list of variables.
+
+What would need to change:
+
+1. **Key source.** Add provider values to `--key-source`, for example `bedrock`, `vertex`, `foundry` and `anthropic-aws`. In those modes `agent.py` would not configure `apiKeyHelper` and would not read the Keychain or Credential Manager. It would set the selection variable for the Claude Code process only, through the SDK options, instead of exporting it in the shell. The check that refuses to start when `ANTHROPIC_API_KEY` is set should stay, so a run uses only the provider it was started with.
+2. **Credentials.** The rule for the Anthropic key applies here too: no static secrets in the shell, in its history or in files of this repository. Prefer each cloud's own sign-in: AWS IAM Identity Center (SSO) profiles, Google Application Default Credentials set up with `gcloud`, and `az login` or Microsoft Entra ID for Azure.
+3. **Model names.** `--model` (or `CLAUDE_MODEL`) and the model of the `doc-analyst` subagent are Anthropic API model IDs. Providers use their own identifiers, and not every model is available in every region. Map the IDs per provider and check availability before the first run: this is the change most likely to fail without an obvious error.
+4. **Error mapping.** The bridge turns API errors into `auth-error`, `rate-limited` and `quota-exhausted`, and stops early on authentication failures. Expired cloud credentials, missing model access or provider quotas may arrive with different messages. Test each case and adjust the mapping, so that it still reaches the right ASP health state instead of a generic failure.
+5. **`--check-key`.** Today it checks the Anthropic key. With a provider it should check the cloud sign-in instead, or be skipped.
+6. **Documentation and tests.** Add the provider to *Setup*, run scenarios 1 to 5 against it, and state in this README which providers have been tested.
+
+Start with one provider, the one the deployment will actually use, and take it through every scenario before adding a second.
+
+One constraint applies whatever the provider: unless Anthropic has approved it, a product built on the Agent SDK cannot offer Claude.ai login or Claude.ai usage limits. It needs an API key or a cloud provider.
+
 ## License
 
 MIT.
